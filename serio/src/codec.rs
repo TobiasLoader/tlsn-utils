@@ -60,7 +60,7 @@ mod bincode_impl {
         type Error = bincode::Error;
 
         fn deserialize<T: Deserialize>(&mut self, buf: &BytesMut) -> Result<T, Self::Error> {
-            Ok(deserialize(buf)?)
+            deserialize(buf)
         }
     }
 
@@ -178,8 +178,8 @@ mod tests {
     fn test_framed() {
         let (a, b) = duplex(1024);
 
-        let mut a = Bincode::default().new_framed(a.compat());
-        let mut b = Bincode::default().new_framed(b.compat());
+        let mut a = Bincode.new_framed(a.compat());
+        let mut b = Bincode.new_framed(b.compat());
 
         let a = async {
             a.send(Ping).await.unwrap();

@@ -17,9 +17,7 @@ pub trait DifferenceMut<Rhs> {
 
 impl<T: Copy + Ord> DifferenceMut<Range<T>> for RangeSet<T> {
     fn difference_mut(&mut self, other: &Range<T>) {
-        if other.is_empty() {
-            return;
-        } else if self.ranges.is_empty() {
+        if other.is_empty() || self.ranges.is_empty() {
             return;
         }
 

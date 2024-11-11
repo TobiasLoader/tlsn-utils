@@ -126,10 +126,8 @@ where
         // If we've finished sending, flush the write buffer. If flushing
         // succeeds then we can return Ready, otherwise we need to keep
         // trying.
-        if state.is_done() {
-            if pin!(&mut state.io).poll_flush(cx)?.is_ready() {
-                return Poll::Ready(Ok(state.io));
-            }
+        if state.is_done() && pin!(&mut state.io).poll_flush(cx)?.is_ready() {
+            return Poll::Ready(Ok(state.io));
         }
 
         self.0 = State::Pending(state);

@@ -97,15 +97,15 @@ impl<T: ?Sized> AsRef<RangeSet<usize>> for Span<T> {
     }
 }
 
-impl<T: ?Sized> Into<Bytes> for Span<T> {
-    fn into(self) -> Bytes {
-        self.data
+impl<T: ?Sized> From<Span<T>> for Bytes {
+    fn from(val: Span<T>) -> Self {
+        val.data
     }
 }
 
-impl<T: ?Sized> Into<RangeSet<usize>> for Span<T> {
-    fn into(self) -> RangeSet<usize> {
-        self.indices
+impl<T: ?Sized> From<Span<T>> for RangeSet<usize> {
+    fn from(val: Span<T>) -> Self {
+        val.indices
     }
 }
 

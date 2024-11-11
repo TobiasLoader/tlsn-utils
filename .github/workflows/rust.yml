@@ -12,20 +12,26 @@ env:
 
 jobs:
   build_and_test:
-    if: ( ! github.event.pull_request.draft )
+    name: Build and test
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Stable
-        uses: actions-rs/toolchain@v1
+      - name: Install stable rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: stable
-      - uses: Swatinem/rust-cache@v2.0.0
+          components: clippy
 
-      - name: "Build"
+      - name: Use caching
+        uses: Swatinem/rust-cache@v2.7.3
+
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+      - name: Build
         run: cargo build
 
       - name: "Test"
@@ -39,17 +45,11 @@ jobs:
         run: cargo doc --no-deps --document-private-items --all-features --workspace --examples
 
   rustfmt:
-    name: Rustfmt
+    name: Check formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Nightly with rustfmt
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-
-      - name: "Check formatting"
-        run: cargo +nightly fmt --check --all
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.7.3
+      - name: Check formatting
+        run: cargo fmt --check --all

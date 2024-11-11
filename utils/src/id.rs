@@ -103,16 +103,16 @@ impl NestedId {
     }
 }
 
-impl ToString for NestedId {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for NestedId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NestedId::String { id, root } => match root {
-                Some(root) => format!("{}/{}", root.to_string(), id),
-                None => id.to_string(),
+                Some(root) => write!(f, "{}/{}", root, id),
+                None => write!(f, "{}", id),
             },
             NestedId::Counter { value, root } => match root {
-                Some(root) => format!("{}/{}", root.to_string(), value),
-                None => value.to_string(),
+                Some(root) => write!(f, "{}/{}", root, value),
+                None => write!(f, "{}", value),
             },
         }
     }

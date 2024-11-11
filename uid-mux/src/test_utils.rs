@@ -31,6 +31,7 @@ pub fn test_yamux_pair(
 ///
 /// * `buffer` - The buffer size.
 /// * `codec` - The codec.
+#[allow(clippy::type_complexity)]
 pub fn test_yamux_pair_framed<C: Clone>(
     buffer: usize,
     codec: C,

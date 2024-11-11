@@ -20,8 +20,8 @@ async fn main() {
     let a = LengthDelimitedCodec::builder().new_framed(a);
     let b = LengthDelimitedCodec::builder().new_framed(b);
 
-    let a = Framed::new(a, Bincode::default());
-    let b = Framed::new(b, Bincode::default());
+    let a = Framed::new(a, Bincode);
+    let b = Framed::new(b, Bincode);
 
     tokio::try_join!(alice(a), bob(b)).unwrap();
 }
