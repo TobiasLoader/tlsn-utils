@@ -1,5 +1,5 @@
 use std::ops::Range;
-
+use crate::http::types::{Chunk, ChunkedBody};
 use bytes::Bytes;
 
 use crate::{
@@ -89,13 +89,22 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
             )));
         }
 
-        let content_type = request
-            .headers_with_name("Content-Type")
-            .next()
-            .map(|header| header.value.as_bytes())
-            .unwrap_or_default();
+        let content_type: Option<&str> = match get_header_values_request(&request, "Content-Type") {
+            Ok(content_types) if !content_types.is_empty() => Some(content_types[0]),
+            _ => None,
+        };
+        let transfer_encoding: Option<&str> = match get_header_values_request(&request, "Transfer-Encoding") {
+            Ok(transfer_encodings) if !transfer_encodings.is_empty() && transfer_encodings.iter().any(|v| *v == "chunked") => Some("chunked"),
+            _ => None,
+        };
 
-        request.body = Some(parse_body(src, range.clone(), content_type)?);
+        request.body = Some(parse_body(
+            src,
+            range.clone(),
+            content_type,
+            transfer_encoding,
+        )?);
+
         request.span = Span::new_bytes(src.clone(), offset..range.end);
     }
 
@@ -180,13 +189,21 @@ pub(crate) fn parse_response_from_bytes(
             )));
         }
 
-        let content_type = response
-            .headers_with_name("Content-Type")
-            .next()
-            .map(|header| header.value.as_bytes())
-            .unwrap_or_default();
+        let content_type: Option<&str> = match get_header_values_response(&response, "Content-Type") {
+            Ok(content_types) if !content_types.is_empty() => Some(content_types[0]),
+            _ => None,
+        };
+        let transfer_encoding: Option<&str> = match get_header_values_response(&response, "Transfer-Encoding") {
+            Ok(transfer_encodings) if !transfer_encodings.is_empty() && transfer_encodings.iter().any(|v| *v == "chunked") => Some("chunked"),
+            _ => None,
+        };
 
-        response.body = Some(parse_body(src, range.clone(), content_type)?);
+        response.body = Some(parse_body(
+            src,
+            range.clone(),
+            content_type,
+            transfer_encoding,
+        )?);
         response.span = Span::new_bytes(src.clone(), offset..range.end);
     }
 
@@ -213,6 +230,41 @@ fn from_header(src: &Bytes, header: &httparse::Header) -> Header {
     }
 }
 
+/// Gets the values of a header in a Request as a list of strings.
+fn get_header_values_request<'a>(
+    request: &'a Request,
+    header_name: &'a str,
+) -> Result<Vec<&'a str>, ParseError> {
+    get_header_values_from_iter(header_name, request.headers_with_name(header_name))
+}
+
+/// Gets the values of a header in a Response as a list of strings.
+fn get_header_values_response<'a>(
+    response: &'a Response,
+    header_name: &'a str,
+) -> Result<Vec<&'a str>, ParseError> {
+    get_header_values_from_iter(header_name, response.headers_with_name(header_name))
+}
+
+/// Gets the values of a header field from an Iterator as a list of strings.
+/// Returns a ParseError if any of the values are not valid UTF-8.
+fn get_header_values_from_iter<'a>(
+    header_name: &'a str,
+    headers: impl Iterator<Item = &'a Header>,
+) -> Result<Vec<&'a str>, ParseError> {
+    headers
+        .map(|h| {
+            std::str::from_utf8(h.value.0.as_bytes())
+                .map(|v| v.trim())
+                .map_err(|err| {
+                    ParseError(format!(
+                        "Invalid UTF-8 when parsing {header_name} header value: {err}"
+                    ))
+                })
+        })
+        .collect()
+}
+
 /// Calculates the length of the request body according to RFC 9112, section 6.
 fn request_body_len(request: &Request) -> Result<usize, ParseError> {
     // The presence of a message body in a request is signaled by a Content-Length
@@ -220,20 +272,18 @@ fn request_body_len(request: &Request) -> Result<usize, ParseError> {
 
     // If a message is received with both a Transfer-Encoding and a Content-Length header field,
     // the Transfer-Encoding overrides the Content-Length
-    if request
-        .headers_with_name("Transfer-Encoding")
-        .next()
-        .is_some()
-    {
-        Err(ParseError(
-            "Transfer-Encoding not supported yet".to_string(),
-        ))
+    let transfer_encodings: Vec<&str> = get_header_values_request(request, "Transfer-Encoding")?;
+    if transfer_encodings.len() > 0 && transfer_encodings.iter().all(|v| *v != "identity") {
+        let bad_values: String = transfer_encodings.join(", ");
+        Err(ParseError(format!(
+            "Transfer-Encoding other than identity not supported yet {bad_values}"
+        )))
     } else if let Some(h) = request.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
         // defines the expected message body length in octets.
         std::str::from_utf8(h.value.0.as_bytes())?
             .parse::<usize>()
-            .map_err(|err| ParseError(format!("failed to parse Content-Length value: {err}")))
+            .map_err(|err| ParseError(format!("Failed to parse Content-Length value: {err}")))
     } else {
         // If this is a request message and none of the above are true, then the message body length is zero
         Ok(0)
@@ -256,14 +306,13 @@ fn response_body_len(response: &Response) -> Result<usize, ParseError> {
         _ => {}
     }
 
-    if response
-        .headers_with_name("Transfer-Encoding")
-        .next()
-        .is_some()
-    {
-        Err(ParseError(
-            "Transfer-Encoding not supported yet".to_string(),
-        ))
+    let transfer_encodings: Vec<&str> = get_header_values_response(response, "Transfer-Encoding")?;
+    if transfer_encodings.len() > 0 && transfer_encodings.iter().all(|v| *v != "identity") {
+        let bad_values: String = transfer_encodings.join(", ");
+
+        Err(ParseError(format!(
+            "Transfer-Encoding other than identity not supported yet: {bad_values}"
+        )))
     } else if let Some(h) = response.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
         // defines the expected message body length in octets.
@@ -288,18 +337,67 @@ fn response_body_len(response: &Response) -> Result<usize, ParseError> {
 /// * `src` - The source bytes.
 /// * `range` - The range of the message body in the source bytes.
 /// * `content_type` - The value of the Content-Type header.
-fn parse_body(src: &Bytes, range: Range<usize>, content_type: &[u8]) -> Result<Body, ParseError> {
-    let span = Span::new_bytes(src.clone(), range.clone());
-    let content = if content_type.get(..16) == Some(b"application/json".as_slice()) {
-        let mut value = json::parse(span.data.clone())?;
-        value.offset(range.start);
+/// * `transfer_encoding` - The value of the Transfer-Encoding header, if any.
+fn parse_body(
+    src: &Bytes,
+    range: Range<usize>,
+    content_type: Option<&str>,
+    transfer_encoding: Option<&str>,
+) -> Result<Body, ParseError> {
+    let span: Span = Span::new_bytes(src.clone(), range.clone());
+    let content: BodyContent = if content_type == Some("application/json") {
+        // if transfer_encoding == Some("chunked") {
+        //     let chunks: Vec<Chunk> = parse_chunked_body(src, range.clone())?;
+        //     let span = Span::new_bytes(src.clone(), range.clone());
+        //     let chunked_body: ChunkedBody = ChunkedBody { chunks, span };
+        //     BodyContent::Chunked(chunked_body)
+        // } else {
+            let mut value: json::JsonValue = json::parse(span.data.clone())?;
+            value.offset(range.start);
 
-        BodyContent::Json(value)
+            BodyContent::Json(value)
+        // }
     } else {
         BodyContent::Unknown(span.clone())
     };
 
     Ok(Body { span, content })
+}
+
+fn parse_chunked_body(src: &Bytes, range: Range<usize>) -> Result<Vec<Chunk>, ParseError> {
+    let mut chunks: Vec<Chunk> = Vec::new();
+    let mut offset: usize = range.start;
+
+    while offset < range.end {
+        // Parse the chunk size
+        let size_end: usize = src[offset..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or_else(|| ParseError("Invalid chunk size".to_string()))?
+            + offset;
+        let size_str: &str = std::str::from_utf8(&src[offset..size_end])
+            .map_err(|_| ParseError("Invalid UTF-8 in chunk size".to_string()))?;
+        let size: usize = usize::from_str_radix(size_str.trim(), 16)
+            .map_err(|_| ParseError("Invalid chunk size".to_string()))?;
+
+        offset = size_end + 2; // Move past the CRLF
+
+        if size == 0 {
+            break; // End of chunks
+        }
+
+        // Capture the chunk data
+        let chunk_data: Bytes = src.slice(offset..offset + size);
+        chunks.push(Chunk {
+            span: Span::new_bytes(src.clone(), offset..offset + size),
+            data: chunk_data,
+            extension: None,
+        });
+
+        offset += size + 2; // Move past the chunk data and CRLF
+    }
+
+    Ok(chunks)
 }
 
 #[cfg(test)]
@@ -362,6 +460,46 @@ mod tests {
                         Content-Type: application/json\r\n\
                         Content-Length: 14\r\n\r\n\
                         {\"foo\": \"bar\"}";
+
+    const TEST_REQUEST_TRANSFER_ENCODING_IDENTITY: &[u8] = b"\
+                        POST / HTTP/1.1\r\n\
+                        Transfer-Encoding: identity\r\n\
+                        Content-Length: 12\r\n\r\n\
+                        Hello World!";
+
+    const TEST_RESPONSE_TRANSFER_ENCODING_IDENTITY: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: identity\r\n\
+                        Content-Length: 12\r\n\r\n\
+                        Hello World!";
+
+    const TEST_REQUEST_TRANSFER_ENCODING_CHUNKED: &[u8] = b"\
+                        POST / HTTP/1.1\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        a\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_RESPONSE_TRANSFER_ENCODING_CHUNKED: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        a\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE: &[u8] = b"\
+                        POST / HTTP/1.1\r\n\
+                        Transfer-Encoding: chunked, identity\r\n\r\n\
+                        a\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: chunked, identity\r\n\r\n\
+                        a\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
 
     #[test]
     fn test_parse_request() {
@@ -495,5 +633,53 @@ mod tests {
         };
 
         assert_eq!(value.span(), "{\"foo\": \"bar\"}");
+    }
+
+    #[test]
+    fn test_parse_request_transfer_encoding_identity() {
+        let req = parse_request(TEST_REQUEST_TRANSFER_ENCODING_IDENTITY).unwrap();
+        assert_eq!(req.body.unwrap().span(), b"Hello World!".as_slice());
+    }
+
+    #[test]
+    fn test_parse_response_transfer_encoding_identity() {
+        let res = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_IDENTITY).unwrap();
+        assert_eq!(res.body.unwrap().span(), b"Hello World!".as_slice());
+    }
+
+    #[test]
+    fn test_parse_request_transfer_encoding_chunked() {
+        let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_CHUNKED).unwrap_err();
+        assert!(matches!(err, ParseError(_)));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
+    }
+
+    #[test]
+    fn test_parse_response_transfer_encoding_chunked() {
+        let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_CHUNKED).unwrap_err();
+        assert!(matches!(err, ParseError(_)));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
+    }
+
+    #[test]
+    fn test_parse_request_transfer_encoding_multiple() {
+        let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
+        assert!(matches!(err, ParseError(_)));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
+    }
+
+    #[test]
+    fn test_parse_response_transfer_encoding_multiple() {
+        let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
+        assert!(matches!(err, ParseError(_)));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
     }
 }

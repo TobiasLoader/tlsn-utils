@@ -1,5 +1,5 @@
-use utils::range::{Difference, RangeSet, ToRangeSet};
-
+use utils::range::{Difference, RangeSet, ToRangeSet, UnionMut};
+use bytes::Bytes;
 use crate::{json::JsonValue, Span, Spanned};
 
 /// An HTTP header name.
@@ -451,6 +451,26 @@ pub enum BodyContent {
     Json(JsonValue),
     /// Body with an unknown content type.
     Unknown(Span),
+    /// Body with a `Transfer-Encoding: chunked` header.
+    Chunked(ChunkedBody),
+}
+        
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkedBody {
+    pub chunks: Vec<Chunk>,
+    pub span: Span,
+}
+
+/// A chunk of a chunked body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    /// The chunk span.
+    pub span: Span,
+    /// The chunk data.
+    pub data: Bytes,
+    /// The chunk extension, if any.
+    pub extension: Option<Span>,
 }
 
 impl Spanned for BodyContent {
@@ -458,6 +478,7 @@ impl Spanned for BodyContent {
         match self {
             BodyContent::Json(json) => json.span().as_ref(),
             BodyContent::Unknown(span) => span,
+            BodyContent::Chunked(chunked_body) => &chunked_body.span,
         }
     }
 }
@@ -467,6 +488,13 @@ impl ToRangeSet<usize> for BodyContent {
         match self {
             BodyContent::Json(json) => json.span().indices.clone(),
             BodyContent::Unknown(span) => span.indices.clone(),
+            BodyContent::Chunked(chunked_body) => {
+                let mut range_set: RangeSet<usize> = RangeSet::new(&[]);
+                for chunk in &chunked_body.chunks {
+                    range_set.union_mut(&chunk.span.indices);
+                }
+                range_set
+            }
         }
     }
 }
