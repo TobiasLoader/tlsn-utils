@@ -213,6 +213,41 @@ fn from_header(src: &Bytes, header: &httparse::Header) -> Header {
     }
 }
 
+/// Gets the values of a header in a Request as a list of strings.
+fn get_header_values_request<'a>(
+    request: &'a Request,
+    header_name: &'a str,
+) -> Result<Vec<&'a str>, ParseError> {
+    get_header_values_from_iter(header_name, request.headers_with_name(header_name))
+}
+
+/// Gets the values of a header in a Response as a list of strings.
+fn get_header_values_response<'a>(
+    response: &'a Response,
+    header_name: &'a str,
+) -> Result<Vec<&'a str>, ParseError> {
+    get_header_values_from_iter(header_name, response.headers_with_name(header_name))
+}
+
+/// Gets the values of a header field from an Iterator as a list of strings.
+/// Returns a ParseError if any of the values are not valid UTF-8.
+fn get_header_values_from_iter<'a>(
+    header_name: &'a str,
+    headers: impl Iterator<Item = &'a Header>,
+) -> Result<Vec<&'a str>, ParseError> {
+    headers
+        .map(|h| {
+            std::str::from_utf8(h.value.0.as_bytes())
+                .map(|v| v.trim())
+                .map_err(|err| {
+                    ParseError(format!(
+                        "Invalid UTF-8 when parsing {header_name} header value: {err}"
+                    ))
+                })
+        })
+        .collect()
+}
+
 /// Calculates the length of the request body according to RFC 9112, section 6.
 fn request_body_len(request: &Request) -> Result<usize, ParseError> {
     // The presence of a message body in a request is signaled by a Content-Length
@@ -220,31 +255,18 @@ fn request_body_len(request: &Request) -> Result<usize, ParseError> {
 
     // If a message is received with both a Transfer-Encoding and a Content-Length header field,
     // the Transfer-Encoding overrides the Content-Length
-    if request
-        .headers_with_name("Transfer-Encoding")
-        .any(|h| {
-            std::str::from_utf8(h.value.0.as_bytes())
-                .unwrap_or("")
-                .split(',')
-                .any(|v| v.trim() != "identity")
-        })
-    {
-        let bad_values = request
-            .headers_with_name("Transfer-Encoding")
-            .map(|h| std::str::from_utf8(h.value.0.as_bytes()).unwrap_or(""))
-            .collect::<Vec<_>>()
-            .join(", ");
-
+    let transfer_encodings: Vec<&str> = get_header_values_request(request, "Transfer-Encoding")?;
+    if transfer_encodings.len() > 0 && transfer_encodings.iter().all(|v| *v != "identity") {
+        let bad_values: String = transfer_encodings.join(", ");
         Err(ParseError(format!(
-            "Transfer-Encoding other than identity not supported yet: {:?}",
-            bad_values
+            "Transfer-Encoding other than identity not supported yet {bad_values}"
         )))
     } else if let Some(h) = request.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
         // defines the expected message body length in octets.
         std::str::from_utf8(h.value.0.as_bytes())?
             .parse::<usize>()
-            .map_err(|err| ParseError(format!("failed to parse Content-Length value: {err}")))
+            .map_err(|err| ParseError(format!("Failed to parse Content-Length value: {err}")))
     } else {
         // If this is a request message and none of the above are true, then the message body length is zero
         Ok(0)
@@ -267,24 +289,12 @@ fn response_body_len(response: &Response) -> Result<usize, ParseError> {
         _ => {}
     }
 
-    if response
-        .headers_with_name("Transfer-Encoding")
-        .any(|h| {
-            std::str::from_utf8(h.value.0.as_bytes())
-                .unwrap_or("")
-                .split(',')
-                .any(|v| v.trim() != "identity")
-        })
-    {
-        let bad_values = response
-            .headers_with_name("Transfer-Encoding")
-            .map(|h| std::str::from_utf8(h.value.0.as_bytes()).unwrap_or(""))
-            .collect::<Vec<_>>()
-            .join(", ");
+    let transfer_encodings: Vec<&str> = get_header_values_response(response, "Transfer-Encoding")?;
+    if transfer_encodings.len() > 0 && transfer_encodings.iter().all(|v| *v != "identity") {
+        let bad_values = transfer_encodings.join(", ");
 
         Err(ParseError(format!(
-            "Transfer-Encoding other than identity not supported yet: {:?}",
-            bad_values
+            "Transfer-Encoding other than identity not supported yet: {bad_values}"
         )))
     } else if let Some(h) = response.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
@@ -575,27 +585,35 @@ mod tests {
     fn test_parse_request_transfer_encoding_chunked() {
         let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_CHUNKED).unwrap_err();
         assert!(matches!(err, ParseError(_)));
-        assert!(err.to_string().contains("Transfer-Encoding other than identity not supported yet"));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
     }
 
     #[test]
     fn test_parse_response_transfer_encoding_chunked() {
         let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_CHUNKED).unwrap_err();
         assert!(matches!(err, ParseError(_)));
-        assert!(err.to_string().contains("Transfer-Encoding other than identity not supported yet"));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
     }
 
     #[test]
     fn test_parse_request_transfer_encoding_multiple() {
         let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
         assert!(matches!(err, ParseError(_)));
-        assert!(err.to_string().contains("Transfer-Encoding other than identity not supported yet"));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
     }
 
     #[test]
     fn test_parse_response_transfer_encoding_multiple() {
         let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
         assert!(matches!(err, ParseError(_)));
-        assert!(err.to_string().contains("Transfer-Encoding other than identity not supported yet"));
+        assert!(err
+            .to_string()
+            .contains("Transfer-Encoding other than identity not supported yet"));
     }
 }
