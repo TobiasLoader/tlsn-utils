@@ -1,5 +1,7 @@
+use std::marker::PhantomData;
+
 use utils::range::{Difference, RangeSet, ToRangeSet, UnionMut};
-use bytes::Bytes;
+use bytes::{Buf, Bytes, BytesMut};
 use crate::{json::JsonValue, Span, Spanned};
 
 /// An HTTP header name.
@@ -488,13 +490,86 @@ impl ToRangeSet<usize> for BodyContent {
         match self {
             BodyContent::Json(json) => json.span().indices.clone(),
             BodyContent::Unknown(span) => span.indices.clone(),
-            BodyContent::Chunked(chunked_body) => {
-                let mut range_set: RangeSet<usize> = RangeSet::new(&[]);
-                for chunk in &chunked_body.chunks {
-                    range_set.union_mut(&chunk.span.indices);
-                }
-                range_set
-            }
+            BodyContent::Chunked(chunked_body) => chunked_body.span.indices.clone(),
         }
+    }
+}
+
+fn chunked_body_range_set(chunks: &[Chunk]) -> RangeSet<usize> {
+    let mut range_set: RangeSet<usize> = RangeSet::new(&[]);
+    for chunk in chunks {
+        range_set.union_mut(&chunk.span.indices);
+    }
+    range_set
+}
+
+fn chunked_body_span(chunks: &[Chunk]) -> Span {
+    let combined_range_set = chunked_body_range_set(chunks);
+    
+    let mut combined_data = BytesMut::new();
+    for chunk in chunks {
+        combined_data.extend_from_slice(&chunk.span.data);
+    }
+    let combined_data = combined_data.freeze();
+
+    Span {
+        data: combined_data,
+        indices: combined_range_set,
+        _pd: PhantomData,
+    }
+}
+
+pub(crate) fn build_chunked_body(chunks: &[Chunk]) -> ChunkedBody {
+    ChunkedBody {
+        chunks: chunks.to_vec(),
+        span: chunked_body_span(chunks),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_build_chunked_body() {
+
+        let chunk_data1 = Bytes::from("aabbccc");
+        let chunk_data2 = Bytes::from("deeeeffg");
+        let src = Bytes::from("aabbcccdeeeeffg");
+        let offset1 = chunk_data1.len();
+
+        println!("chunk_data1: {:?}", chunk_data1.as_ref());
+        println!("chunk_data2: {:?}", chunk_data2.as_ref());
+
+        // Create some sample chunks
+        let chunk1 = Chunk {
+            span: Span::new_bytes(src.clone(), 2..4),
+            data: chunk_data1,
+            extension: None,
+        };
+
+        println!("chunk1: {:?}", chunk1);
+
+        let chunk2 = Chunk {
+            span: Span::new_bytes(src.clone(), offset1+1..offset1 + 5),
+            data: chunk_data2,
+            extension: None,
+        };
+
+
+        println!("chunk2: {:?}", chunk2);
+        // Create a ChunkedBody with these chunks
+        let chunked_body = build_chunked_body(&[chunk1, chunk2]);
+        let body_content = BodyContent::Chunked(chunked_body);
+
+        // Get the range set from the ChunkedBody
+        let range_set = body_content.span().indices.clone();
+
+        println!("body_content: {:?}", body_content);
+        println!("range_set: {:?}", range_set);
+
+
+        assert_eq!(body_content.span(), b"bbeeee".as_slice());
     }
 }

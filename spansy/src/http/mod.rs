@@ -2,7 +2,8 @@
 
 mod span;
 mod types;
-
+pub(crate) mod helpers;
+pub(crate) mod parse;
 use bytes::Bytes;
 
 pub use span::{parse_request, parse_response};
