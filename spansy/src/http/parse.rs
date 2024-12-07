@@ -1,5 +1,5 @@
 use crate::http::{types::{Chunk, ChunkedBody, Header}, Body, BodyContent, ParseError};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use std::ops::Range;
 use crate::http::types::build_chunked_body;
 

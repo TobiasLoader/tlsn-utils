@@ -85,11 +85,11 @@ pub(crate) fn is_valid_transfer_encoding_response(response: &Response) -> bool {
 pub(crate) fn invalid_transfer_encoding_message_request(request: &Request) -> String {
     let transfer_encodings: Vec<&str> = get_header_values_request(request, "Transfer-Encoding").unwrap_or_default();
     let bad_values: String = transfer_encodings.join(", ");
-    format!("Transfer-Encoding other than identity not supported yet {bad_values}")
+    format!("Transfer-Encoding other than {} not supported yet: {bad_values}", super::span::ACCEPTED_TRANSFER_ENCODINGS.join(", "))
 }
 
 pub(crate) fn invalid_transfer_encoding_message_response(response: &Response) -> String {
     let transfer_encodings: Vec<&str> = get_header_values_response(response, "Transfer-Encoding").unwrap_or_default();
     let bad_values: String = transfer_encodings.join(", ");
-    format!("Transfer-Encoding other than identity not supported yet {bad_values}")
+    format!("Transfer-Encoding other than {} not supported yet: {bad_values}", super::span::ACCEPTED_TRANSFER_ENCODINGS.join(", "))
 }

@@ -299,6 +299,8 @@ fn response_body_len(response: &Response, transfer_encoding: Option<&str>, src: 
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::format;
+
     use crate::Spanned;
 
     use super::*;
@@ -386,6 +388,22 @@ mod tests {
                         Hello \r\n\
                         6\r\n\
                         World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_REQUEST_TRANSFER_ENCODING_CHUNKED_JSON: &[u8] = b"\
+                        POST / HTTP/1.1\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        e\r\n\
+                        {\"foo\": \"bar\"}\r\n\
+                        0\r\n\r\n";
+
+    const TEST_RESPONSE_TRANSFER_ENCODING_CHUNKED_JSON: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        c\r\n\
+                        {\"foo\": \"bar\r\n\
+                        2\r\n\
+                        \"}\r\n\
                         0\r\n\r\n";
 
     const TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE: &[u8] = b"\
@@ -560,13 +578,25 @@ mod tests {
         assert_eq!(res.body.unwrap().span(), b"Hello World!".as_slice());
     }
 
+    #[test]     
+    fn test_parse_request_transfer_encoding_chunked_json() {
+        let req = parse_request(TEST_REQUEST_TRANSFER_ENCODING_CHUNKED_JSON).unwrap();
+        assert_eq!(req.body.unwrap().span(), b"{\"foo\": \"bar\"}".as_slice());
+    }
+
+    #[test]
+    fn test_parse_response_transfer_encoding_chunked_json() {
+        let res = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_CHUNKED_JSON).unwrap();
+        assert_eq!(res.body.unwrap().span(), b"{\"foo\": \"bar\"}".as_slice());
+    }
+
     #[test]
     fn test_parse_request_transfer_encoding_multiple() {
         let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
         assert!(matches!(err, ParseError(_)));
         assert!(err
             .to_string()
-            .contains("Transfer-Encoding other than identity not supported yet"));
+            .contains(format!("Transfer-Encoding other than {} not supported yet:", ACCEPTED_TRANSFER_ENCODINGS.join(", ")).as_str()));
     }
 
     #[test]
@@ -575,6 +605,6 @@ mod tests {
         assert!(matches!(err, ParseError(_)));
         assert!(err
             .to_string()
-            .contains("Transfer-Encoding other than identity not supported yet"));
+            .contains(format!("Transfer-Encoding other than {} not supported yet:", ACCEPTED_TRANSFER_ENCODINGS.join(", ")).as_str()));
     }
 }
