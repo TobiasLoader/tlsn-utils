@@ -86,7 +86,9 @@ impl Iterator for Responses {
         } else {
             Some(
                 parse_response_from_bytes(&self.src, self.pos).inspect(|resp| {
-                    self.pos += resp.span.len();
+                    // by using res.total_len instead of resp.span.len() we can traverse
+                    // the entire response data correctly to handle multiple responses in one transcript
+                    self.pos += resp.total_len;
                 }),
             )
         }
@@ -106,6 +108,8 @@ mod tests {
     const MULTIPLE_RESPONSES: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n\
         HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\nHello, world!\n\
         HTTP/1.1 204 OK\r\nContent-Length: 0\r\n\r\n";
+
+    const TEST_RESPONSE_SWAPI: &[u8] = b"HTTP/1.1 200 OK\r\nServer: nginx/1.16.1\r\nDate: Tue, 10 Dec 2024 14:46:44 GMT\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\nVary: Accept, Cookie\r\nX-Frame-Options: SAMEORIGIN\r\nETag: \"df2ecd17a7953452d4000883f4f97b77\"\r\nAllow: GET, HEAD, OPTIONS\r\nStrict-Transport-Security: max-age=15768000\r\n\r\n345\r\n{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}\r\n0\r\n\r\n";
 
     #[test]
     fn test_parse_requests() {
@@ -251,4 +255,14 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(headers.first().unwrap().value.as_bytes(), b"14");
     }
+
+    #[test]
+    fn test_parse_response_swapi() {
+        let responses = Responses::new_from_slice(TEST_RESPONSE_SWAPI).collect::<Result<Vec<_>, _>>().unwrap();
+        println!("responses: {:?}", responses);
+        let res = responses.first().unwrap();
+        let body = res.body.as_ref().unwrap();
+        assert_eq!(body.span(), b"{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}".as_slice());
+    }
 }
+

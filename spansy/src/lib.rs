@@ -131,7 +131,7 @@ impl<T: ?Sized> Span<T> {
     pub fn len(&self) -> usize {
         self.indices.len()
     }
-
+    
     /// Returns `true` if the span is empty.
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()

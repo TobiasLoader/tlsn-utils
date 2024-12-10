@@ -117,7 +117,9 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
 
 /// Parses an HTTP response.
 pub fn parse_response(src: &[u8]) -> Result<Response, ParseError> {
-    parse_response_from_bytes(&Bytes::copy_from_slice(src), 0)
+    let res = parse_response_from_bytes(&Bytes::copy_from_slice(src), 0);
+    println!("success2");
+    res
 }
 
 /// Parses an HTTP response from a `Bytes` buffer starting from the `offset`.
@@ -177,12 +179,16 @@ pub(crate) fn parse_response_from_bytes(
         },
         headers,
         body: None,
+        total_len: src.len(),
     };
 
     let content_type: Option<&str> = helpers::get_content_type_response(&response);
     let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_response(&response);
     
     let body_len: usize = response_body_len(&response, transfer_encoding, content_type, src, head_end)?;
+
+    println!("body_len: {:?}", body_len);
+    println!("transfer_encoding: {:?}", transfer_encoding);
 
     if body_len > 0 {
         let range = head_end..head_end + body_len;
@@ -211,6 +217,8 @@ pub(crate) fn parse_response_from_bytes(
 
         response.body = Some(body);
     }
+
+    println!("success1");
 
     Ok(response)
 }
@@ -453,21 +461,7 @@ mod tests {
                         Hello World!\r\n\
                         0\r\n\r\n";
 
-    const TEST_RESPONSE_SWAPI: &[u8] = b"\
-                        HTTP/1.1 200 OK\r\n\
-                        Transfer-Encoding: chunked\r\n\
-                        Server: nginx/1.16.1\r\n\
-                        Date: Tue, 10 Dec 2024 10:43:37 GMT\r\n\
-                        Content-Type: application/json\r\n\
-                        Connection: close\r\n\
-                        Vary: Accept, Cookie\r\n\
-                        X-Frame-Options: SAMEORIGIN\r\n\
-                        ETag: \"df2ecd17a7953452d4000883f4f97b77\"\r\n\
-                        Allow: GET, HEAD, OPTIONS\r\n\
-                        Strict-Transport-Security: max-age=15768000\r\n\r\n\
-                        345\r\n\
-                        {\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}\r\n\
-                        0\r\n\r\n";
+    const TEST_RESPONSE_SWAPI: &[u8] = b"HTTP/1.1 200 OK\r\nServer: nginx/1.16.1\r\nDate: Tue, 10 Dec 2024 14:46:44 GMT\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\nVary: Accept, Cookie\r\nX-Frame-Options: SAMEORIGIN\r\nETag: \"df2ecd17a7953452d4000883f4f97b77\"\r\nAllow: GET, HEAD, OPTIONS\r\nStrict-Transport-Security: max-age=15768000\r\n\r\n345\r\n{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}\r\n0\r\n\r\n";
 
                         
                         

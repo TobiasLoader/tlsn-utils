@@ -360,6 +360,8 @@ pub struct Response {
     pub headers: Vec<Header>,
     /// Response body.
     pub body: Option<Body>,
+    /// The response total length.
+    pub total_len: usize,
 }
 
 impl Response {
