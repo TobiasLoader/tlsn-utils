@@ -1,4 +1,3 @@
-use crate::http::types::{Chunk, ChunkedBody};
 use bytes::Bytes;
 use crate::http::helpers;
 use crate::http::parse::{parse_body, parse_content_length, parse_transfer_encoding_chunked_length};
@@ -7,14 +6,14 @@ use crate::{
     helpers::get_span_range,
     http::{
         Code, Header, HeaderName, HeaderValue, Method, Reason, Request,
-        RequestLine, Response, Status, Target, BodyContent
+        RequestLine, Response, Status, Target
     },
     ParseError, Span,
 };
 
 
 const MAX_HEADERS: usize = 128;
-pub(crate) const ACCEPTED_TRANSFER_ENCODINGS: [&str; 2] = ["identity", "chunked"];
+pub(crate) const ACCEPTED_TRANSFER_ENCODINGS: [&str; 2] = ["chunked", "identity"];
 
 
 /// Parses an HTTP request.
@@ -81,8 +80,8 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
 
     let content_type: Option<&str> = helpers::get_content_type_request(&request);
     let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_request(&request);
-
-    let body_len: usize = request_body_len(&request, transfer_encoding, src, head_end)?;
+    println!("transfer_encoding: {:?}", transfer_encoding);
+    let body_len: usize = request_body_len(&request, transfer_encoding, content_type, src, head_end)?;
 
     if body_len > 0 {
         let range = head_end..head_end + body_len;
@@ -182,8 +181,8 @@ pub(crate) fn parse_response_from_bytes(
 
     let content_type: Option<&str> = helpers::get_content_type_response(&response);
     let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_response(&response);
-
-    let body_len: usize = response_body_len(&response, transfer_encoding, src, head_end)?;
+    
+    let body_len: usize = response_body_len(&response, transfer_encoding, content_type, src, head_end)?;
 
     if body_len > 0 {
         let range = head_end..head_end + body_len;
@@ -237,7 +236,7 @@ fn from_header(src: &Bytes, header: &httparse::Header) -> Header {
 }
 
 /// Calculates the length of the request body according to RFC 9112, section 6.
-fn request_body_len(request: &Request, transfer_encoding: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
+fn request_body_len(request: &Request, transfer_encoding: Option<&str>, content_type: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
     // The presence of a message body in a request is signaled by a Content-Length
     // or Transfer-Encoding header field.
 
@@ -248,19 +247,25 @@ fn request_body_len(request: &Request, transfer_encoding: Option<&str>, src: &By
         Err(ParseError(helpers::invalid_transfer_encoding_message_request(request)))
     } else if transfer_encoding == Some("chunked") {
         // If the message is chunked, the chunked length is the message body length.
-        parse_transfer_encoding_chunked_length(src, offset)
+        parse_transfer_encoding_chunked_length(src, offset, content_type)
     } else if let Some(h) = request.headers_with_name("Content-Length").next() {
-        // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
-        // defines the expected message body length in octets.
+        // If a valid Content-Length header field is present without Transfer-Encoding, or with Transfer-Encoding identity,
+        // its decimal value defines the expected message body length in octets.
         parse_content_length(h)
     } else {
-        // If this is a request message and none of the above are true, then the message body length is zero
-        Ok(0)
+        if transfer_encoding == Some("identity") {
+            // If transfer encoding is identity, then it must have a Content-Length header.
+            Err(ParseError(
+                "A request with Transfer-Encoding identity must contain a Content-Length header".to_string(),
+            ))
+        } else {
+            Ok(0)
+        }
     }
 }
 
 /// Calculates the length of the response body according to RFC 9112, section 6.
-fn response_body_len(response: &Response, transfer_encoding: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
+fn response_body_len(response: &Response, transfer_encoding: Option<&str>, content_type: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
     // Any response to a HEAD request and any response with a 1xx (Informational), 204 (No Content), or 304 (Not Modified)
     // status code is always terminated by the first empty line after the header fields, regardless of the header fields
     // present in the message, and thus cannot contain a message body or trailer section.
@@ -275,33 +280,43 @@ fn response_body_len(response: &Response, transfer_encoding: Option<&str>, src: 
         _ => {}
     }
 
+    // println!("transfer_encoding: {:?}", transfer_encoding);
+    // println!("get_header_values_request: {:?}", crate::http::helpers::get_header_values_response(response, "Transfer-Encoding"));
+    // println!("headers: {:?}",  std::str::from_utf8(response.headers_with_name("Transfer-Encoding").next().unwrap().value.0.as_bytes()));
+
     if !helpers::is_valid_transfer_encoding_response(response) {
         // If there exists a Transfer-Encoding header and it is not valid throw an error.
         Err(ParseError(helpers::invalid_transfer_encoding_message_response(response)))
     }  else if transfer_encoding == Some("chunked") {
         // If the message is chunked, the chunked length is the message body length.
-        parse_transfer_encoding_chunked_length(src, offset)
+        parse_transfer_encoding_chunked_length(src, offset, content_type)
     } else if let Some(h) = response.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
         // defines the expected message body length in octets.
         parse_content_length(h)
     } else {
-        // If this is a response message and none of the above are true, then there is no way to
-        // determine the length of the message body except by reading it until the connection is closed.
+        if transfer_encoding == Some("identity") {
+            // If transfer encoding is identity, then it must have a Content-Length header.
+            Err(ParseError(
+                "A response with Transfer-Encoding identity must contain a Content-Length header".to_string(),
+            ))
+        } else {
+            // If this is a response message and none of the above are true, then there is no way to
+            // determine the length of the message body except by reading it until the connection is closed.
 
-        // We currently consider this an error because we have no outer context information.
-        Err(ParseError(
-            "A response with a body must contain either a Content-Length or Transfer-Encoding header".to_string(),
-        ))
+            // We currently consider this an error because we have no outer context information.
+            Err(ParseError(
+                "A response with a body must contain either a Content-Length or Transfer-Encoding header".to_string(),
+            ))
+        }
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::format;
-
     use crate::Spanned;
+    use crate::http::BodyContent;
 
     use super::*;
 
@@ -408,18 +423,54 @@ mod tests {
 
     const TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE: &[u8] = b"\
                         POST / HTTP/1.1\r\n\
-                        Transfer-Encoding: chunked, identity\r\n\r\n\
-                        a\r\n\
+                        Transfer-Encoding: identity\r\n\
+                        Transfer-Encoding: gzip\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        c\r\n\
                         Hello World!\r\n\
                         0\r\n\r\n";
 
     const TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE: &[u8] = b"\
                         HTTP/1.1 200 OK\r\n\
-                        Transfer-Encoding: chunked, identity\r\n\r\n\
-                        a\r\n\
+                        Transfer-Encoding: identity\r\n\
+                        Transfer-Encoding: gzip\r\n\
+                        Transfer-Encoding: chunked\r\n\r\n\
+                        c\r\n\
                         Hello World!\r\n\
                         0\r\n\r\n";
 
+    const TEST_REQUEST_TRANSFER_ENCODING_GZIP: &[u8] = b"\
+                        POST / HTTP/1.1\r\n\
+                        Transfer-Encoding: gzip\r\n\r\n\
+                        c\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_RESPONSE_TRANSFER_ENCODING_GZIP: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: gzip\r\n\r\n\
+                        c\r\n\
+                        Hello World!\r\n\
+                        0\r\n\r\n";
+
+    const TEST_RESPONSE_SWAPI: &[u8] = b"\
+                        HTTP/1.1 200 OK\r\n\
+                        Transfer-Encoding: chunked\r\n\
+                        Server: nginx/1.16.1\r\n\
+                        Date: Tue, 10 Dec 2024 10:43:37 GMT\r\n\
+                        Content-Type: application/json\r\n\
+                        Connection: close\r\n\
+                        Vary: Accept, Cookie\r\n\
+                        X-Frame-Options: SAMEORIGIN\r\n\
+                        ETag: \"df2ecd17a7953452d4000883f4f97b77\"\r\n\
+                        Allow: GET, HEAD, OPTIONS\r\n\
+                        Strict-Transport-Security: max-age=15768000\r\n\r\n\
+                        345\r\n\
+                        {\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}\r\n\
+                        0\r\n\r\n";
+
+                        
+                        
     #[test]
     fn test_parse_request() {
         let req = parse_request(TEST_REQUEST).unwrap();
@@ -592,7 +643,20 @@ mod tests {
 
     #[test]
     fn test_parse_request_transfer_encoding_multiple() {
-        let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
+        let req = parse_request(TEST_REQUEST_TRANSFER_ENCODING_MULTIPLE).unwrap();
+        assert_eq!(req.body.unwrap().span(), b"Hello World!".as_slice());
+    }
+
+    #[test]
+    fn test_parse_response_transfer_encoding_multiple() {
+        let res = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE).unwrap();
+        assert_eq!(res.body.unwrap().span(), b"Hello World!".as_slice());
+    }
+
+
+    #[test]
+    fn test_parse_request_transfer_encoding_gzip() {
+        let err = parse_request(TEST_REQUEST_TRANSFER_ENCODING_GZIP).unwrap_err();
         assert!(matches!(err, ParseError(_)));
         assert!(err
             .to_string()
@@ -600,11 +664,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_response_transfer_encoding_multiple() {
-        let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_MULTIPLE).unwrap_err();
+    fn test_parse_response_transfer_encoding_gzip() {
+        let err = parse_response(TEST_RESPONSE_TRANSFER_ENCODING_GZIP).unwrap_err();
         assert!(matches!(err, ParseError(_)));
         assert!(err
             .to_string()
             .contains(format!("Transfer-Encoding other than {} not supported yet:", ACCEPTED_TRANSFER_ENCODINGS.join(", ")).as_str()));
+    }
+
+
+    #[test]
+    fn test_parse_response_swapi() {
+        let res = parse_response(TEST_RESPONSE_SWAPI).unwrap();
+        assert_eq!(res.body.unwrap().span(), b"{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}".as_slice());
     }
 }

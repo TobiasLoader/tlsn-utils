@@ -48,9 +48,8 @@ pub(crate) fn get_content_type_request(request: &Request) -> Option<&str> {
 pub(crate) fn get_transfer_encoding_request(request: &Request) -> Option<&str> {
     match get_header_values_request(&request, "Transfer-Encoding") {
         Ok(transfer_encodings) => super::span::ACCEPTED_TRANSFER_ENCODINGS
-            .iter()
-            .find(|&&accepted| transfer_encodings.contains(&accepted))
-            .map(|&v| v),
+            .into_iter()
+            .find(|&accepted| transfer_encodings.contains(&accepted)),
         _ => None,
     }
 }
@@ -65,9 +64,8 @@ pub(crate) fn get_content_type_response(response: &Response) -> Option<&str> {
 pub(crate) fn get_transfer_encoding_response(response: &Response) -> Option<&str> {
     match get_header_values_response(&response, "Transfer-Encoding") {
         Ok(transfer_encodings) => super::span::ACCEPTED_TRANSFER_ENCODINGS
-            .iter()
-            .find(|&&accepted| transfer_encodings.contains(&accepted))
-            .map(|&v| v),
+            .into_iter()
+            .find(|accepted| transfer_encodings.contains(accepted)),
         _ => None,
     }
 }

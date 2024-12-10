@@ -13,8 +13,28 @@ pub(crate) fn parse_content_length(h: &Header) -> Result<usize, ParseError> {
 }
 
 // Parse length of the body from the Transfer-Encoding header.
-pub(crate) fn parse_transfer_encoding_chunked_length(src: &Bytes, mut offset: usize) -> Result<usize, ParseError> {
+pub(crate) fn parse_transfer_encoding_chunked_length(src: &Bytes, mut offset: usize, content_type: Option<&str>) -> Result<usize, ParseError> {
     let mut total_length: usize = 0;
+
+    // let mut src_bytes: Bytes = src.clone();
+    // if content_type == Some("application/json") {
+    //     // return Ok(0);
+    //     // let mut iter = src.iter();
+    //     // while let Some(b) = iter.next() {
+    //     //     if *b == b'\\' {
+    //     //         iter.next();
+    //     //     }
+    //     // }
+    //     println!("src: {:?}", src.to_vec());
+    //     // println!("number of 0x5c: {:?}", &src_bytes.clone().into_iter().filter(|b: &u8| *b == 13).collect());
+    //     let filtered_bytes: bytes::Bytes = src_bytes.clone().into_iter().filter(|b: &u8| *b == 13).collect();
+    //     println!("number of 0x5c: {:?}", filtered_bytes);
+    //     // src_bytes = src_bytes.into_iter().filter(|b| *b != 0x5C).collect();      
+    //     // println!("number of 0x5c: {:?}", &src_bytes.into_iter().filter(|b: &u8| *b == 0x5C).count());
+    // }
+
+    println!("src: {:?}", src);
+    // println!("src_bytes: {:?}", src_bytes);
 
     loop {
         // Parse the chunk size
