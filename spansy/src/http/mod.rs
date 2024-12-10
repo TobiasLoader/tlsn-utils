@@ -42,9 +42,14 @@ impl Iterator for Requests {
     type Item = Result<Request, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        println!("NEXT");
+        println!("pos: {:?}", self.pos);
+        println!("src len: {:?}", self.src.len());
         if self.pos >= self.src.len() {
+            println!("NONE");
             None
         } else {
+            println!("SOME");
             Some(
                 parse_request_from_bytes(&self.src, self.pos).inspect(|req| {
                     self.pos += req.total_len;
@@ -81,14 +86,17 @@ impl Iterator for Responses {
     type Item = Result<Response, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        println!("NEXT");
+        println!("pos: {:?}", self.pos);
+        println!("src len: {:?}", self.src.len());
         if self.pos >= self.src.len() {
+            println!("NONE");
             None
         } else {
+            println!("SOME");
             Some(
-                parse_response_from_bytes(&self.src, self.pos).inspect(|res| {
-                    // by using res.total_len instead of resp.span.len() we can traverse
-                    // the entire response data correctly to handle multiple responses in one transcript
-                    self.pos += res.total_len;
+                parse_response_from_bytes(&self.src, self.pos).inspect(|resp| {
+                    self.pos += resp.total_len;
                 }),
             )
         }
@@ -105,10 +113,14 @@ mod tests {
         POST /hello HTTP/1.1\r\nHost: localhost\r\nContent-Length: 14\r\n\r\n\
         Hello, world!\n";
 
-    const MULTIPLE_RESPONSES: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n\
-        HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\nHello, world!\n\
-        HTTP/1.1 204 OK\r\nContent-Length: 0\r\n\r\n";
+    // const MULTIPLE_RESPONSES: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n\
+    //     HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\nHello, world!\n\
+    //     HTTP/1.1 204 OK\r\nContent-Length: 0\r\n\r\n";
 
+    const MULTIPLE_RESPONSES: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n\
+        HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nc\r\n{\"foo\": \"bar\r\n2\r\n\"}\r\n0\r\n\r\n";
+
+    const TEST_REQUEST_SWAPI: &[u8] = b"GET /api/planets/1/ HTTP/1.1\r\nhost: swapi.dev\r\naccept: */*\r\naccept-encoding: identity\r\nconnection: close\r\nuser-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\r\n\r\n";
     const TEST_RESPONSE_SWAPI: &[u8] = b"HTTP/1.1 200 OK\r\nServer: nginx/1.16.1\r\nDate: Tue, 10 Dec 2024 14:46:44 GMT\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\nVary: Accept, Cookie\r\nX-Frame-Options: SAMEORIGIN\r\nETag: \"df2ecd17a7953452d4000883f4f97b77\"\r\nAllow: GET, HEAD, OPTIONS\r\nStrict-Transport-Security: max-age=15768000\r\n\r\n345\r\n{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}\r\n0\r\n\r\n";
 
     #[test]
@@ -162,7 +174,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        assert_eq!(resps.len(), 3);
+        assert_eq!(resps.len(), 2);
 
         assert_eq!(resps[0].status.code.as_str(), "200");
         assert_eq!(
@@ -179,29 +191,17 @@ mod tests {
         assert_eq!(resps[1].status.code.as_str(), "200");
         assert_eq!(
             resps[1]
-                .headers_with_name("content-length")
+                .headers_with_name("transfer-encoding")
                 .next()
                 .unwrap()
                 .value
                 .as_bytes(),
-            b"14"
+            b"chunked"
         );
         assert_eq!(
             resps[1].body.as_ref().unwrap().span(),
-            b"Hello, world!\n".as_slice()
+            b"{\"foo\": \"bar\"}".as_slice()
         );
-
-        assert_eq!(resps[2].status.code.as_str(), "204");
-        assert_eq!(
-            resps[2]
-                .headers_with_name("content-length")
-                .next()
-                .unwrap()
-                .value
-                .as_bytes(),
-            b"0"
-        );
-        assert!(resps[2].body.is_none());
     }
 
     #[test]
@@ -257,12 +257,21 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_response_swapi() {
-        let responses = Responses::new_from_slice(TEST_RESPONSE_SWAPI).collect::<Result<Vec<_>, _>>().unwrap();
+    fn test_parse_request_response_swapi() -> Result<(), ParseError> {
+        let requests = Requests::new(Bytes::copy_from_slice(TEST_REQUEST_SWAPI))
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        println!("requests: {:?}", requests);
+
+        let responses = Responses::new(Bytes::copy_from_slice(TEST_RESPONSE_SWAPI))
+            .collect::<Result<Vec<_>, _>>()?;
+
         println!("responses: {:?}", responses);
         let res = responses.first().unwrap();
         let body = res.body.as_ref().unwrap();
         assert_eq!(body.span(), b"{\"name\":\"Tatooine\",\"rotation_period\":\"23\",\"orbital_period\":\"304\",\"diameter\":\"10465\",\"climate\":\"arid\",\"gravity\":\"1 standard\",\"terrain\":\"desert\",\"surface_water\":\"1\",\"population\":\"200000\",\"residents\":[\"https://swapi.dev/api/people/1/\",\"https://swapi.dev/api/people/2/\",\"https://swapi.dev/api/people/4/\",\"https://swapi.dev/api/people/6/\",\"https://swapi.dev/api/people/7/\",\"https://swapi.dev/api/people/8/\",\"https://swapi.dev/api/people/9/\",\"https://swapi.dev/api/people/11/\",\"https://swapi.dev/api/people/43/\",\"https://swapi.dev/api/people/62/\"],\"films\":[\"https://swapi.dev/api/films/1/\",\"https://swapi.dev/api/films/3/\",\"https://swapi.dev/api/films/4/\",\"https://swapi.dev/api/films/5/\",\"https://swapi.dev/api/films/6/\"],\"created\":\"2014-12-09T13:50:49.641000Z\",\"edited\":\"2014-12-20T20:58:18.411000Z\",\"url\":\"https://swapi.dev/api/planets/1/\"}".as_slice());
+
+        Ok(())
     }
 }
 

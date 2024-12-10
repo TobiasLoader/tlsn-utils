@@ -208,7 +208,7 @@ pub struct Request {
     pub headers: Vec<Header>,
     /// Request body.
     pub body: Option<Body>,
-    /// The request total length.
+    /// Total length of the request bytes (used for parsing multiple requests).
     pub total_len: usize,
 }
 
@@ -362,7 +362,7 @@ pub struct Response {
     pub headers: Vec<Header>,
     /// Response body.
     pub body: Option<Body>,
-    /// The response total length.
+    /// Total length of the response bytes (used for parsing multiple responses).
     pub total_len: usize,
 }
 
@@ -434,6 +434,14 @@ impl Body {
     pub fn offset(&mut self, offset: usize) {
         self.span.offset(offset);
     }
+
+    /// Returns the total length of the body, including any chunked encoding overhead.
+    pub fn total_len(&self) -> usize {
+        match &self.content {
+            BodyContent::Chunked(chunked) => chunked.total_len,
+            _ => self.span.len(),
+        }
+    }
 }
 
 impl Spanned for Body {
@@ -463,13 +471,16 @@ pub enum BodyContent {
         
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChunkedBody {
     pub chunks: Vec<Chunk>,
     pub span: Span,
+    pub total_len: usize,
 }
 
 /// A chunk of a chunked body.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chunk {
     /// The chunk span.
     pub span: Span,
@@ -523,10 +534,11 @@ fn chunked_body_span(chunks: &[Chunk]) -> Span {
     }
 }
 
-pub(crate) fn build_chunked_body(chunks: &[Chunk]) -> ChunkedBody {
+pub(crate) fn build_chunked_body(chunks: &[Chunk], total_len: usize) -> ChunkedBody {
     ChunkedBody {
         chunks: chunks.to_vec(),
         span: chunked_body_span(chunks),
+        total_len,
     }
 }
 
@@ -564,7 +576,7 @@ mod tests {
 
         println!("chunk2: {:?}", chunk2);
         // Create a ChunkedBody with these chunks
-        let chunked_body = build_chunked_body(&[chunk1, chunk2]);
+        let chunked_body = build_chunked_body(&[chunk1, chunk2], 14);
         let body_content = BodyContent::Chunked(chunked_body);
 
         // Get the range set from the ChunkedBody

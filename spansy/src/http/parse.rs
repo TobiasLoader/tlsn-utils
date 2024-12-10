@@ -75,15 +75,18 @@ pub(crate) fn parse_transfer_encoding_chunked_length(src: &Bytes, mut offset: us
 pub(crate) fn parse_body(
     src: &Bytes,
     range: Range<usize>,
+    offset: usize,
     content_type: Option<&str>,
     transfer_encoding: Option<&str>,
 ) -> Result<Body, ParseError> {
 
     if transfer_encoding == Some("chunked") {
-        let chunks: Vec<Chunk> = parse_chunked_body(src, range.clone())?;
+        let (chunks, pos) = parse_transfer_encoding_chunked(src, range.clone())?;
         // println!("chunks: {:?}", chunks);
         // build the chunked body
-        let chunked_body: ChunkedBody = build_chunked_body(&chunks);
+        let total_len: usize = pos - offset;
+        println!("total_len: {:?}", total_len);
+        let chunked_body: ChunkedBody = build_chunked_body(&chunks, total_len);
         return Ok(Body { span: chunked_body.span.clone(), content: BodyContent::Chunked(chunked_body) });
     } 
 
@@ -100,7 +103,7 @@ pub(crate) fn parse_body(
     Ok(Body { span, content })
 }
 
-pub(crate) fn parse_chunked_body(src: &Bytes, range: Range<usize>) -> Result<Vec<Chunk>, ParseError> {
+pub(crate) fn parse_transfer_encoding_chunked(src: &Bytes, range: Range<usize>) -> Result<(Vec<Chunk>,usize), ParseError> {
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut pos: usize = range.start;
 
@@ -135,5 +138,5 @@ pub(crate) fn parse_chunked_body(src: &Bytes, range: Range<usize>) -> Result<Vec
         pos = chunk_data_end + 2;
     }
 
-    Ok(chunks)
+    Ok((chunks, pos+2))
 }

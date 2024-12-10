@@ -1,6 +1,7 @@
 use bytes::Bytes;
-use crate::http::helpers;
+use crate::http::{helpers, BodyContent};
 use crate::http::parse::{parse_body, parse_content_length, parse_transfer_encoding_chunked_length};
+use crate::http::types::ChunkedBody;
 
 use crate::{
     helpers::get_span_range,
@@ -76,14 +77,14 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
         },
         headers,
         body: None,
-        total_len: src.len(),
+        total_len: 0,
     };
 
     let content_type: Option<&str> = helpers::get_content_type_request(&request);
     let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_request(&request);
     println!("transfer_encoding: {:?}", transfer_encoding);
-    let body_len: usize = request_body_len(&request, transfer_encoding, content_type, src, head_end)?;
-
+    let body_len: usize = request_body_len(&request, transfer_encoding, src, head_end)?;
+    
     if body_len > 0 {
         let range = head_end..head_end + body_len;
 
@@ -100,6 +101,7 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
         let body = parse_body(
             src,
             range.clone(),  
+            offset,
             content_type,
             transfer_encoding.clone(),
         )?;
@@ -110,7 +112,19 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
             request.span = Span::new_bytes(src.clone(), offset..range.end);   
         }
 
+        match &body.content {
+            BodyContent::Chunked(chunked_body) => {
+                request.total_len = chunked_body.total_len;
+            }
+            _ => {
+                request.total_len = request.span.len();
+            }
+        }
+
         request.body = Some(body);
+
+    } else {
+        request.total_len = request.span.len();
     }
 
     Ok(request)
@@ -180,13 +194,13 @@ pub(crate) fn parse_response_from_bytes(
         },
         headers,
         body: None,
-        total_len: src.len(),
+        total_len: 0,
     };
 
-    let content_type: Option<&str> = helpers::get_content_type_response(&response);
-    let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_response(&response);
+    let content_type: Option<&str> = helpers::get_content_type_response(&response).clone();
+    let transfer_encoding: Option<&str> = helpers::get_transfer_encoding_response(&response).clone();
     
-    let body_len: usize = response_body_len(&response, transfer_encoding, content_type, src, head_end)?;
+    let body_len: usize = response_body_len(&response, transfer_encoding, src, head_end)?;
 
     println!("body_len: {:?}", body_len);
     println!("transfer_encoding: {:?}", transfer_encoding);
@@ -206,6 +220,7 @@ pub(crate) fn parse_response_from_bytes(
         let body = parse_body(
             src,
             range.clone(),  
+            offset,
             content_type,
             transfer_encoding.clone(),
         )?;
@@ -213,10 +228,21 @@ pub(crate) fn parse_response_from_bytes(
         if transfer_encoding.clone() == Some("chunked") {
             response.span = body.span.clone();
         } else {
-            response.span = Span::new_bytes(src.clone(), offset..range.end);   
+            response.span = Span::new_bytes(src.clone(), offset..range.end);
+        }
+
+        match &body.content {
+            BodyContent::Chunked(chunked_body) => {
+                response.total_len = chunked_body.total_len;
+            }
+            _ => {
+                response.total_len = response.span.len();
+            }
         }
 
         response.body = Some(body);
+    } else {
+        response.total_len = response.span.len();
     }
 
     println!("success1");
@@ -245,7 +271,7 @@ fn from_header(src: &Bytes, header: &httparse::Header) -> Header {
 }
 
 /// Calculates the length of the request body according to RFC 9112, section 6.
-fn request_body_len(request: &Request, transfer_encoding: Option<&str>, content_type: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
+fn request_body_len(request: &Request, transfer_encoding: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
     // The presence of a message body in a request is signaled by a Content-Length
     // or Transfer-Encoding header field.
 
@@ -274,7 +300,7 @@ fn request_body_len(request: &Request, transfer_encoding: Option<&str>, content_
 }
 
 /// Calculates the length of the response body according to RFC 9112, section 6.
-fn response_body_len(response: &Response, transfer_encoding: Option<&str>, content_type: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
+fn response_body_len(response: &Response, transfer_encoding: Option<&str>, src: &Bytes, offset: usize) -> Result<usize, ParseError> {
     // Any response to a HEAD request and any response with a 1xx (Informational), 204 (No Content), or 304 (Not Modified)
     // status code is always terminated by the first empty line after the header fields, regardless of the header fields
     // present in the message, and thus cannot contain a message body or trailer section.
