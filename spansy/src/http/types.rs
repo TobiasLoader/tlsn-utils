@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use utils::range::{Difference, RangeSet, ToRangeSet, UnionMut};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use crate::{json::JsonValue, Span, Spanned};
 
 /// An HTTP header name.
@@ -208,6 +208,8 @@ pub struct Request {
     pub headers: Vec<Header>,
     /// Request body.
     pub body: Option<Body>,
+    /// The request total length.
+    pub total_len: usize,
 }
 
 impl Request {

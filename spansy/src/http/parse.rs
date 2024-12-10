@@ -13,7 +13,7 @@ pub(crate) fn parse_content_length(h: &Header) -> Result<usize, ParseError> {
 }
 
 // Parse length of the body from the Transfer-Encoding header.
-pub(crate) fn parse_transfer_encoding_chunked_length(src: &Bytes, mut offset: usize, content_type: Option<&str>) -> Result<usize, ParseError> {
+pub(crate) fn parse_transfer_encoding_chunked_length(src: &Bytes, mut offset: usize) -> Result<usize, ParseError> {
     let mut total_length: usize = 0;
 
     // let mut src_bytes: Bytes = src.clone();

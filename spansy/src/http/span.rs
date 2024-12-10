@@ -76,6 +76,7 @@ pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Req
         },
         headers,
         body: None,
+        total_len: src.len(),
     };
 
     let content_type: Option<&str> = helpers::get_content_type_request(&request);
@@ -255,7 +256,7 @@ fn request_body_len(request: &Request, transfer_encoding: Option<&str>, content_
         Err(ParseError(helpers::invalid_transfer_encoding_message_request(request)))
     } else if transfer_encoding == Some("chunked") {
         // If the message is chunked, the chunked length is the message body length.
-        parse_transfer_encoding_chunked_length(src, offset, content_type)
+        parse_transfer_encoding_chunked_length(src, offset)
     } else if let Some(h) = request.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, or with Transfer-Encoding identity,
         // its decimal value defines the expected message body length in octets.
@@ -297,7 +298,7 @@ fn response_body_len(response: &Response, transfer_encoding: Option<&str>, conte
         Err(ParseError(helpers::invalid_transfer_encoding_message_response(response)))
     }  else if transfer_encoding == Some("chunked") {
         // If the message is chunked, the chunked length is the message body length.
-        parse_transfer_encoding_chunked_length(src, offset, content_type)
+        parse_transfer_encoding_chunked_length(src, offset)
     } else if let Some(h) = response.headers_with_name("Content-Length").next() {
         // If a valid Content-Length header field is present without Transfer-Encoding, its decimal value
         // defines the expected message body length in octets.

@@ -47,7 +47,7 @@ impl Iterator for Requests {
         } else {
             Some(
                 parse_request_from_bytes(&self.src, self.pos).inspect(|req| {
-                    self.pos += req.span.len();
+                    self.pos += req.total_len;
                 }),
             )
         }
@@ -85,10 +85,10 @@ impl Iterator for Responses {
             None
         } else {
             Some(
-                parse_response_from_bytes(&self.src, self.pos).inspect(|resp| {
+                parse_response_from_bytes(&self.src, self.pos).inspect(|res| {
                     // by using res.total_len instead of resp.span.len() we can traverse
                     // the entire response data correctly to handle multiple responses in one transcript
-                    self.pos += resp.total_len;
+                    self.pos += res.total_len;
                 }),
             )
         }
