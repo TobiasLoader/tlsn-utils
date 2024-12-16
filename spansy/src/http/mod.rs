@@ -14,7 +14,8 @@ pub use types::{
 
 use crate::ParseError;
 
-use self::span::{parse_request_from_bytes, parse_response_from_bytes};
+pub use self::span::{parse_request_from_bytes, parse_response_from_bytes};
+
 /// An iterator yielding parsed HTTP requests.
 #[derive(Debug)]
 pub struct Requests {
