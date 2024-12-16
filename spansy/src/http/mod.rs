@@ -1,9 +1,9 @@
 //! HTTP span parsing.
 
-mod span;
-mod types;
+pub mod span;
+pub mod parse;
+pub(crate) mod types;
 pub(crate) mod helpers;
-pub(crate) mod parse;
 use bytes::Bytes;
 
 pub use span::{parse_request, parse_response};

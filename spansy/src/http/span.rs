@@ -1,7 +1,9 @@
+//! Module for parsing HTTP requests and responses.
+
 use bytes::Bytes;
 use crate::http::{helpers, BodyContent};
 use crate::http::parse::{parse_body, parse_content_length, parse_transfer_encoding_chunked_length};
-use crate::http::types::ChunkedBody;
+// use crate::http::types::ChunkedBody;
 
 use crate::{
     helpers::get_span_range,
@@ -23,7 +25,7 @@ pub fn parse_request(src: &[u8]) -> Result<Request, ParseError> {
 }
 
 /// Parses an HTTP request from a `Bytes` buffer starting from the `offset`.
-pub(crate) fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Request, ParseError> {
+pub fn parse_request_from_bytes(src: &Bytes, offset: usize) -> Result<Request, ParseError> {
     let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
 
     let (method, path, head_end) = {
@@ -138,7 +140,7 @@ pub fn parse_response(src: &[u8]) -> Result<Response, ParseError> {
 }
 
 /// Parses an HTTP response from a `Bytes` buffer starting from the `offset`.
-pub(crate) fn parse_response_from_bytes(
+pub fn parse_response_from_bytes(
     src: &Bytes,
     offset: usize,
 ) -> Result<Response, ParseError> {

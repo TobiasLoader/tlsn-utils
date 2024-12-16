@@ -1,3 +1,5 @@
+//! Module for parsing HTTP headers and body content.
+
 use crate::http::{types::{Chunk, ChunkedBody, Header}, Body, BodyContent, ParseError};
 use bytes::Bytes;
 use std::ops::Range;

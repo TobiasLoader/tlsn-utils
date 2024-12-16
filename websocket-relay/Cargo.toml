@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["TLSNotary Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/tlsnotary/tlsn-utils"
+repository = "https://github.com/TobiasLoader/tlsn-utils"
 description = """A relay for websocket clients."""
 
 [dependencies]

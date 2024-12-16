@@ -6,7 +6,7 @@ description = "Async multiplexing library with user provided stream ids."
 keywords = ["multiplex", "futures", "async"]
 categories = ["network-programming", "asynchronous"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/tlsnotary/tlsn-utils"
+repository = "https://github.com/TobiasLoader/tlsn-utils"
 edition = "2021"
 
 [features]
